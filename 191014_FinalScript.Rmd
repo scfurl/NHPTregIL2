@@ -1,0 +1,254 @@
+---
+title: "NHPTreg Making Final Figures"
+author: "SNF"
+date: "10/12/2019"
+output:
+  html_document:
+    toc: false 
+    depth: 3 
+    theme: paper 
+    highlight: tango
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r, echo=F}
+rm(list=ls())
+graphics.off()
+suppressPackageStartupMessages({
+  library(monocle3)
+  library(m3addon)
+  library(reticulate)
+  library(openxlsx)  
+  library(dplyr)
+  library(Matrix)
+  library(ggplot2)
+  library(h5)
+  library(xfun)
+  library(pals)
+  library(RColorBrewer)
+  library(piano)
+  library(GSEABase)
+  
+})
+
+# Set global ggplot2 properties for making print-scaled PDF panels
+SFtheme<-theme_bw(base_size=14) + 
+  theme(panel.background = element_rect(fill = "transparent",colour = NA), # or theme_blank()
+    panel.grid.minor = element_blank(), 
+    panel.grid.major = element_blank(),
+    plot.background = element_rect(fill = "transparent",colour = NA))
+theme_set(SFtheme)
+cluster_colors<-c(brewer.pal(12, "Paired"), brewer.pal(8, "Dark2"), brewer.pal(8, "Accent"))
+exp_colors<-c("grey85", "orange", "red", "violetred4", "black")
+c2<-brewer.pal(12, "Paired")
+s2<-brewer.pal(8, "Set2")
+d2<-brewer.pal(8, "Dark2")
+cell_colors <- c("CFSEpos_D3"=c2[4], "CFSEpos_D20"=c2[3], "Endo_D3"=c2[2], "Endo_D20"=c2[1],
+    "CD127posCD25neg_D3"=c2[6], "CD127posCD25neg_D20"=c2[5], "CD127posCD25pos_D3"=c2[8], "CD127posCD25pos_D20"=c2[7])
+p_col<-brewer.pal(12, "Paired")
+s2_col<-brewer.pal(8, "Set2")
+d2_col<-brewer.pal(8, "Dark2")
+cluster_colors<-c(d2_col[5], s2_col[5],p_col[10], p_col[9],d2_col[4], s2_col[4],s2_col[8], d2_col[8], d2_col[2], d2_col[6])
+names(cluster_colors)<-paste0(1:10)
+
+qvalue_thresh = 0.01
+fc_thresh = 0.6
+expr_thresh = 0.1
+percent_cells = 0.01
+
+SUB_DIR<-"/Users/sfurla/Box Sync/PI_FurlanS/computation/Analysis/NHPTreg_mm/submission"
+SUB_DIR<-"SET PATH TO FILES HERE"
+
+e<-data.table::fread(file.path(SUB_DIR, "exprs_data.txt"), sep="\t")
+rn<-e$V1
+e$V1<-NULL
+em<-Matrix(as.matrix(e), sparse=T)
+pd<-data.table::fread(file.path(SUB_DIR, "meta_data.txt"), sep="\t")
+rn<-pd$V1
+pd$V1<-NULL
+pd<-data.frame(pd, row.names = rn)
+fd<-data.table::fread(file.path(SUB_DIR, "gene_data.txt"), sep="\t")
+rn<-fd$V1
+fd$V1<-NULL
+fd<-data.frame(fd, row.names = rn)
+
+cds<-new_cell_data_set(expression_data = em, cell_metadata = DataFrame(pd), gene_metadata = DataFrame(as.data.frame(fd)))
+
+```
+
+
+###FIGURE 3 and SF2b, SF3
+```{r, echo=F, message=F, warning=F, eval=T}
+
+reducedDims(cds)[["tSNE"]]<-cbind(as.numeric(pData(cds)$tSNE_1), as.numeric(pData(cds)$tSNE_2))
+cds<-cluster_cells(cds, reduction_method = "tSNE")
+pData(cds)$Cluster<-factor(pData(cds)$Cluster)
+
+#Fig3a
+plot_cells(cds, color_cells_by = "Cluster", reduction_method = "tSNE",  cluster_reduction_method = "tSNE", label_cell_groups = F)+scale_color_manual(values=cluster_colors)+
+  guides(colour = guide_legend(override.aes = list(size=10)))+
+  coord_fixed()
+
+#Fig3b-L
+plot_cells(cds, color_cells_by = "Category", reduction_method = "tSNE",  cluster_reduction_method = "tSNE", label_cell_groups = F, cell_size = 0.3)+scale_color_manual(values=cell_colors)+coord_fixed()+
+  guides(colour = guide_legend(override.aes = list(size=10)))
+
+
+
+df<-as.data.frame(table(pData(cds)$Category, pData(cds)$Cluster))
+
+#Fig3b-R
+ggplot(df)+
+      geom_col(aes(y=Freq, x=Var2, fill=Var1))+
+      scale_fill_manual(values=cell_colors)+
+  labs(x="Clust2",y="Cell Number")
+
+pData(cds)$CellType<-as.character(pData(cds)$Cluster)
+pData(cds)$CellType[pData(cds)$Cluster %in% 1:2]<-"transTreg"
+pData(cds)$CellType[pData(cds)$Cluster %in% 3:4]<-"endoTreg"
+pData(cds)$CellType[pData(cds)$Cluster %in% 5:10]<-"Tconv"
+
+# Fig 3c
+plot_genes_violin(cds[fData(cds)$gene_short_name %in% c("FOXP3", "IL2RA", "IL7R", "SELL"),], grouping = "Cluster", color_by = "Cluster")+scale_fill_manual(values=cluster_colors)+theme(axis.text.y = element_text(size=9))
+
+
+#Supp Fig 2b
+plot_genes_violin(cds[fData(cds)$gene_short_name %in% c("CCNB2", "MKI67"),], grouping = "Cluster", color_by = "Cluster")+scale_fill_manual(values=cluster_colors)
+
+#Supp Fig 3
+plot_genes_violin(cds[fData(cds)$gene_short_name %in% c("CD58", "CD63", "LGALS3", "S100A4"),], grouping = "Cluster", color_by = "Cluster")+scale_fill_manual(values=cluster_colors)
+
+
+
+
+
+amsen<-probedeeper::GMTtoList(GMTfn = file.path(SUB_DIR, "GSE90600_Amsen_Tregs.GMT"))
+
+
+
+
+Tr<-intersect(amsen[["nTregvsnTconv_UP"]], amsen[["eTregvsmTconv_UP"]])
+#table(pData(cds)$CellType)
+pData(cds)$CellType<-factor(as.character(pData(cds)$CellType), levels=c("endoTreg","transTreg","Tconv"))
+pData(cds)$CellType1<-as.character(pData(cds)$Cluster)
+pData(cds)$CellType1[pData(cds)$Cluster %in% 5:10]<-"Tconv"
+#table(pData(cds)$CellType1)
+
+
+
+g<-plot_grouped_geneset(cds, Tr, name = "Tr_intersect", by="CellType", method = "totals", jitter=F, return_values = T, box_width=0.1)
+g$plot+scale_fill_manual(values=c("purple", "green", "black"))
+pairwise.wilcox.test(g$scores$Tr_intersect, g$scores$CellType, p.adjust.method = "BH")
+
+
+##GSEA AND DE
+comps<-list(endo=c("endoTreg", "Tconv"), trans=c("transTreg", "Tconv"))
+# fitlists<-lapply(comps, function(comp){
+#   cdsDE<-cds[,pData(cds)$CellType %in% comp]
+#   cdsDE<-detect_genes(cdsDE)
+#   pData(cdsDE)$CellType<-factor(as.character(pData(cdsDE)$CellType), levels=c(comp[2], comp[1]))
+#   gene_fits <-fit_models(cdsDE, model_formula_str = "~CellType", cores = 1)
+#   fit_coefs = coefficient_table(gene_fits)
+#   fit_coefs$term
+#   fit_coefs = fit_coefs %>% filter(term == paste0("CellType", comp[1])) %>% arrange(-normalized_effect)
+#   #saveRDS(fit_coefs, file.path(RES_DIR, paste0("190711-DE_byLig_cell50_", name, ".RDS")))
+#   fit_coefs
+# })
+# saveRDS(fitlists, file.path(RES_DIR, paste0("endoANDtransTregvsTconv", ".RDS")))
+fitlists <- readRDS(file.path(RES_DIR, paste0("endoANDtransTregvsTconv", ".RDS")))
+
+wGsc=loadGSC(stack(c(amsen, list(Treg_specific=Tr))))
+gsalist<-lapply(fitlists, function(fit_coefs){
+  ranks<-as.numeric(fit_coefs$normalized_effect)
+  names(ranks)<-fit_coefs$gene_short_name
+  ranks<-ranks[!duplicated(names(ranks))]
+  gsa<-runGSA(geneLevelStats =ranks, gsc = wGsc, geneSetStat = "fgsea", verbose = T)
+})
+names(gsalist)<-names(comps)
+
+rankslist<-lapply(fitlists, function(fit_coefs){
+  ranks<-fit_coefs$normalized_effect
+  names(ranks)<-fit_coefs$gene_short_name
+  ranks<-ranks[!duplicated(names(ranks))]
+})
+
+gs<-"Treg_specific"
+direction<-"UP"
+epm<-enrichmentPlot(pathway = wGsc$gsc[[gs]], stats = rankslist, return_data = T)
+epm$plot+ggtitle(gs, subtitle = paste0("endoTreg samples on L; Tconv on R\n", returnFDR(gsalist, gs)))+scale_color_manual(values=c("purple", "green"))
+
+write.xlsx(epm$df_out, file.path(RES_DIR, "TregSpecific_LE.xlsx"))
+
+#Fig3f
+plot_grouped_geneset(cds, amsen[["nTregvseTreg_UP"]], name = "nTregvseTreg_UP", by="Clust2", facet = "CellType", method = "totals", jitter = F)+scale_fill_manual(values=cluster_colors)
+plot_grouped_geneset(cds, amsen[["nTregvseTreg_DN"]], name = "nTregvseTreg_DN", by="Clust2", facet = "CellType", method = "totals", jitter = F)+scale_fill_manual(values=cluster_colors)
+
+
+
+##SF4
+
+table(pData(cds)$Category)
+cdsS<-cds[,pData(cds)$Category %in% c("Endo_D20", "Endo_D3")]
+
+
+cdsS<-detect_genes(cdsS)
+cdsS<-cdsS[fData(cdsS)$num_cells_expressed>1,]
+cdsS<-estimate_size_factors(cdsS)
+cdsS<-calculate_gene_dispersion(cdsS, method="m2")
+
+plot_gene_dispersion(cdsS)
+cdsS<-select_genes(cdsS, fit_min = 0.72, logmean_ul = 0, logmean_ll = -4.6)
+plot_gene_dispersion(cdsS)
+cdsS<-preprocess_cds(cdsS, method = "PCA", use_genes = get_ordering_genes(cdsS, gene_column = "gene_id"))
+
+plot_pc_variance_explained(cdsS)
+
+cdsS<-reduce_dimension(cdsS, reduction_method = "tSNE", num_dim = 10, verbose=T)
+cdsS<-cluster_cells(cdsS, verbose=T, reduction_method = "PCA", resolution = 9.2e-3, k = 20, louvain_iter = 1,)
+df<-as.data.frame(table(clusters(cdsS, reduction_method = "PCA"), pData(cdsS)$Cluster))
+    
+ggplot(df)+
+      geom_col(aes(y=Freq, x=Var1, fill=Var2))+
+      scale_fill_manual(values=cluster_colors)+
+  labs(x="Clust2",y="Cell Number")
+
+table(clusters(cdsS, reduction_method = "PCA"))
+pData(cdsS)$NCluster<-c("Tconv", "nTreg", "aTreg","Fr.III", "Other")[clusters(cdsS, reduction_method = "PCA")]
+
+plot_cells(cdsS, color_cells_by = "NCluster", reduction_method = "tSNE", cluster_reduction_method = "PCA", label_cell_groups = F, cell_size = 0.7)
+
+GMT_name<-"nTregvseTreg_DN"
+plot_grouped_geneset(cdsS, by = "NCluster", amsen[[GMT_name]], name = GMT_name, jitter = F)
+
+GMT_name<-"eTregvsFr.III_DN"
+plot_grouped_geneset(cdsS, by = "NCluster", amsen[[GMT_name]], name = GMT_name, jitter = F)
+
+
+plot_genes_violin(cdsS[fData(cdsS)$gene_short_name %in% c("FOXP3", "IL2RA",  "IL7R",  "ISG15", "MX1")], grouping = "NCluster", color_by = "NCluster")+theme(axis.text.y = element_text(size=9))
+
+bs<-getBroadSets(file.path(SUB_DIR, "msigdb_v6.2.xml"))
+GMTlist<-lapply(bs, "slot", "geneIds")
+names(GMTlist)<-lapply(bs, "slot", "setName")
+
+
+GMT_name = "HALLMARK_INTERFERON_GAMMA_RESPONSE" 
+
+pData(cds)$GMT_name<-estimate_corrected_score(cds, GMTlist[[GMT_name]])
+
+pData(cds)$CellType2<-as.character(pData(cds)$Cluster)
+pData(cds)$CellType2[pData(cds)$Cluster %in% 1:9]<-"1-10"
+
+plot_grouped_geneset(cds, by = "CellType2", GMTlist[[GMT_name]], name = GMT_name, jitter = F)+scale_fill_manual(values=c('1-10'="white", cluster_colors[10]))
+pairwise.wilcox.test(x=pData(cds)$GMT_name, g=pData(cds)$CellType2)
+
+
+##FIGURE 4b,c,d - Transferred trajectory
+
+cds_S<-cds[,!is.na(pData(cds)$UMAP_Clust)]
+
+reducedDims(cds_S)[["UMAP"]]<-cbind(pData(cds_S)$UMAP_1, pData(cds_S)$UMAP_2)
+cds_S<-cluster_cells(cds_S)
+plot_cells(cds_S, color_cells_by = "UMAP_Clust", reduction_method = "UMAP",  label_cell_groups = F, cell_size = 0.7)
+```
